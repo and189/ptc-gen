@@ -2,6 +2,7 @@ import subprocess
 import sys
 import os
 import random
+import string
 import time
 import csv
 import re
@@ -35,8 +36,8 @@ for package in required_packages:
 
 # Configuration Section
 EMAIL_CONFIG = {
-    "user": "XXX@gmail.com",
-    "password": "XXXX XXXX XXXX XXXX",
+    "user": "xxxx@gmail.com",
+    "password": "xxxx xxxx xxxx xxxxx",
     "imap_host": "imap.gmail.com",
     "target_sender": "no-reply@tmi.pokemon.com"
 }
@@ -120,9 +121,7 @@ def get_random_name():
     # Stelle sicher, dass die Länge zwischen 12 und 16 Zeichen liegt
     return username[:random.randint(12, 16)]
 
-# Beispielnutzung
-for _ in range(10):
-    print(get_random_name())
+
 
 def generate_random_email():
     local_part = get_random_name()
