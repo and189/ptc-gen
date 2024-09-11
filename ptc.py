@@ -1,5 +1,19 @@
 import subprocess
 import sys
+import os
+import random
+import time
+import csv
+import re
+import imaplib
+import email
+import traceback
+from datetime import datetime, timedelta
+import undetected_chromedriver as uc
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 # List of required packages
 required_packages = [
@@ -18,26 +32,11 @@ def install_and_import(package):
 # Install all required packages if they are missing
 for package in required_packages:
     install_and_import(package)
-    
-import random
-import time
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-import os
-import re
-import imaplib
-import email
-import csv
-from datetime import datetime, timedelta
-import traceback
 
 # Configuration Section
 EMAIL_CONFIG = {
-    "user": "xxxxx@gmail.com",
-    "password": "xx xx xxxx xxx",
+    "user": "XXX@gmail.com",
+    "password": "XXXX XXXX XXXX XXXX",
     "imap_host": "imap.gmail.com",
     "target_sender": "no-reply@tmi.pokemon.com"
 }
@@ -45,6 +44,11 @@ EMAIL_CONFIG = {
 DOMAIN_CONFIG = {
     "domains": ["kwstaylor.eu", "impreva.eu"]
 }
+
+PROXY_STATS_FILE = 'proxy_stats.csv'
+PROXY_FILE = 'proxies.txt'
+BLOCKED_PROXIES_FILE = 'blocked_proxies.txt'
+LAST_PROXY_FILE = 'last_proxy.txt'
 
 def save_account_to_csv(email, username, password, pin):
     now = datetime.now()
@@ -77,11 +81,28 @@ def generate_random_birthdate():
     return year, month, day
 
 def get_random_name():
-    first_names = ["Max", "Lukas", "Felix", "Jonas", "Leon", "Emma", "Anna"]
-    last_names = ["Schmidt", "Mueller", "Weber", "Fischer", "Schneider"]
+    first_names = [
+        "Max", "Lukas", "Felix", "Jonas", "Leon", "Emma", "Anna", "Sophia", "Mia", "Noah", "Paul", "Elias", 
+        "Lena", "Marie", "Clara", "Finn", "Ben", "Tom", "Julia", "Lea", "Erik", "Hanna", "Tim", "Laura", "Lara"
+    ]
+    
+    last_names = [
+        "Schmidt", "Mueller", "Weber", "Fischer", "Schneider", "Lehmann", "Koch", "Bauer", "Wagner", "Becker",
+        "Hoffmann", "Schulz", "Krause", "Richter", "Wolf", "Neumann", "Zimmermann", "Hartmann", "Klein", "Schwarz"
+    ]
+    
+    # Kombiniere Vor- und Nachnamen
     name = random.choice(first_names).lower() + random.choice(last_names).lower()
-    number = str(random.randint(1000, 9999))
-    username = ''.join(random.choice([char.upper(), char.lower()]) for char in name + number)
+    
+    # Füge Zahlen hinzu
+    number = ''.join(random.choices('0123456789', k=random.randint(2, 4)))
+    
+    # Füge zufällig einige zusätzliche Buchstaben am Ende hinzu
+    extra_letters = ''.join(random.choices('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ', k=random.randint(2, 4)))
+    
+    # Mische Groß- und Kleinbuchstaben in Name, Zahl und Zusatzbuchstaben
+    username = ''.join(random.choice([char.upper(), char.lower()]) for char in name + number + extra_letters)
+    
     return username[:random.randint(12, 16)]
 
 def generate_random_email():
@@ -104,27 +125,56 @@ def generate_random_password():
     password = ''.join(random.sample(password, len(password)))
     print(f"Generated random password: {password}")
     return password
-
-# Proxy Stats File
-PROXY_STATS_FILE = 'proxy_stats.csv'
-
-def initialize_proxy_stats():
-    # Check if the stats file exists, if not create it with headers
-    if not os.path.exists(PROXY_STATS_FILE):
-        with open(PROXY_STATS_FILE, mode='w', newline='') as file:
-            writer = csv.writer(file)
-            writer.writerow(['Proxy', 'Bans', 'Successes'])
-
-def update_proxy_stats(proxy, success=False):
-    stats = {}
+def handle_username_error(driver, username_input, password_input, random_username, random_password, attempts=3):
+    error_message = "Username is already used by someone else."
     
-    # Load the current stats
+    for attempt in range(attempts):
+        print(f"Versuch {attempt + 1}: Prüfen, ob der Benutzername {random_username} verfügbar ist.")
+        
+        try:
+            # Überprüfen, ob die Fehlermeldung angezeigt wird
+            error_element = driver.find_element(By.CSS_SELECTOR, "p#error-text[data-testid='Username-text-input-error']")
+            if error_message in error_element.text:
+                print(f"Benutzername {random_username} ist bereits vergeben. Neuer Benutzername wird generiert.")
+                
+                # Neuer Benutzername
+                random_username = get_random_name()
+
+                # Löschen und Eingeben des neuen Benutzernamens
+                username_input.clear()
+                human_like_mouse_move(driver, username_input)
+                username_input.send_keys(random_username)
+                time.sleep(2)
+
+                # Passwort erneut eingeben
+                password_input.clear()
+                human_like_mouse_move(driver, password_input)
+                password_input.send_keys(random_password)
+                time.sleep(2)
+            else:
+                print(f"Benutzername {random_username} ist verfügbar.")
+                return random_username  # Username ist erfolgreich
+        except:
+            print(f"Kein Fehler für den Benutzernamen {random_username} erkannt.")
+            return random_username  # Username ist erfolgreich
+        
+    print(f"Nach {attempts} Versuchen konnte kein verfügbarer Benutzername gefunden werden. Abbruch.")
+    return None  # Kein gültiger Username nach mehreren Versuchen
+
+
+# Proxy Statistiken initialisieren oder laden
+def load_proxy_stats():
+    stats = {}
     if os.path.exists(PROXY_STATS_FILE):
         with open(PROXY_STATS_FILE, mode='r') as file:
             reader = csv.reader(file)
-            next(reader)  # Skip header
+            next(reader)  # Überspringe den Header
             for row in reader:
                 stats[row[0]] = {'bans': int(row[1]), 'successes': int(row[2])}
+    return stats
+
+def update_proxy_stats(proxy, success=False):
+    stats = load_proxy_stats()
     
     if proxy not in stats:
         stats[proxy] = {'bans': 0, 'successes': 0}
@@ -134,92 +184,57 @@ def update_proxy_stats(proxy, success=False):
     else:
         stats[proxy]['bans'] += 1
     
-    # Save the updated stats
     with open(PROXY_STATS_FILE, mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow(['Proxy', 'Bans', 'Successes'])
         for proxy, stat in stats.items():
             writer.writerow([proxy, stat['bans'], stat['successes']])
-def is_proxy_blocked(proxy, blocked_proxies):
-    if proxy in blocked_proxies:
-        blocked_time = blocked_proxies[proxy]
-        if datetime.now() < blocked_time:
-            print(f"Proxy {proxy} ist bis {blocked_time} gesperrt.")
-            return True
-        else:
-            del blocked_proxies[proxy]
-            save_blocked_proxies(blocked_proxies)
-            print(f"Proxy {proxy} ist nicht mehr gesperrt.")
-    return False
-    
-def block_proxy(proxy, blocked_proxies, block_duration_minutes, success=False):
-    if success:
-        print(f"Proxy {proxy} marked as successful. Blocking for {block_duration_minutes} minutes.")
-        update_proxy_stats(proxy, success=True)
-        # Proxy für 10 Minuten sperren (Cooldown)
-        blocked_proxies[proxy] = datetime.now() + timedelta(minutes=block_duration_minutes)
-    else:
-        print(f"Proxy {proxy} blocked for {block_duration_minutes} minutes due to failure.")
-        update_proxy_stats(proxy, success=False)
-        # Proxy für eine längere Zeit blockieren (bei Fehler)
-        blocked_proxies[proxy] = datetime.now() + timedelta(minutes=block_duration_minutes)
-    
-    # Gesperrte Proxies speichern
-    save_blocked_proxies(blocked_proxies)
 
-# Cooldown Logic Improvement (reusing blocked_proxies correctly)
 def load_blocked_proxies():
     blocked_proxies = {}
-    blocked_proxies_file = 'blocked_proxies.txt'
-    if os.path.exists(blocked_proxies_file):
-        with open(blocked_proxies_file, 'r') as file:
+    if os.path.exists(BLOCKED_PROXIES_FILE):
+        with open(BLOCKED_PROXIES_FILE, 'r') as file:
             for line in file:
                 proxy, timestamp = line.strip().split(',')
                 blocked_time = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
                 if datetime.now() < blocked_time:
                     blocked_proxies[proxy] = blocked_time
-                else:
-                    print(f"Proxy {proxy} block expired.")
     return blocked_proxies
 
 def save_blocked_proxies(blocked_proxies):
-    blocked_proxies_file = 'blocked_proxies.txt'
-    with open(blocked_proxies_file, 'w') as file:
+    with open(BLOCKED_PROXIES_FILE, 'w') as file:
         for proxy, timestamp in blocked_proxies.items():
             file.write(f"{proxy},{timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n")
 
+def block_proxy(proxy, blocked_proxies, block_duration_minutes, success=False):
+    if success:
+        print(f"Proxy {proxy} erfolgreich. Sperren für {block_duration_minutes} Minuten.")
+    else:
+        print(f"Proxy {proxy} gescheitert. Sperren für {block_duration_minutes} Minuten.")
+    
+    blocked_proxies[proxy] = datetime.now() + timedelta(minutes=block_duration_minutes)
+    save_blocked_proxies(blocked_proxies)
+    update_proxy_stats(proxy, success=success)
+
 def get_proxy():
-    proxies_file = 'proxies.txt'
-    last_proxy_file = 'last_proxy.txt'
+    proxies = []
     blocked_proxies = load_blocked_proxies()
+    
+    if os.path.exists(PROXY_FILE):
+        with open(PROXY_FILE, 'r') as file:
+            proxies = [line.strip() for line in file.readlines()]
 
-    if os.path.exists(proxies_file):
-        with open(proxies_file, 'r+') as file:
-            proxies = file.readlines()
+        # Mische die Proxy-Liste nach jedem Lauf
+        random.shuffle(proxies)
 
-            if os.path.exists(last_proxy_file):
-                with open(last_proxy_file, 'r') as last_file:
-                    last_proxy = last_file.read().strip()
-                    if last_proxy + '\n' in proxies:
-                        proxies.remove(last_proxy + '\n')
-                        proxies.insert(0, last_proxy + '\n')
+        for proxy in proxies:
+            if proxy not in blocked_proxies or datetime.now() > blocked_proxies[proxy]:
+                print(f"Verwende Proxy: {proxy}")
+                with open(LAST_PROXY_FILE, 'w') as last_file:
+                    last_file.write(proxy)
+                return proxy, blocked_proxies
 
-            for proxy in proxies:
-                proxy = proxy.strip()
-                if not is_proxy_blocked(proxy, blocked_proxies):
-                    print(f"Using proxy: {proxy}")
-                    with open(last_proxy_file, 'w') as last_file:
-                        last_file.write(proxy)
-
-                    file.seek(0)
-                    file.writelines([p for p in proxies if p.strip() != proxy])
-                    file.truncate()
-                    with open(proxies_file, 'a') as file_append:
-                        file_append.write(proxy + '\n')
-
-                    return proxy, blocked_proxies
-
-    print("No proxies found or unable to read proxies file.")
+    print("Keine verfügbaren Proxys gefunden.")
     return None, blocked_proxies
 
 def setup_selenium(headless=False):
@@ -232,21 +247,15 @@ def setup_selenium(headless=False):
     chrome_options.add_argument("--disable-extensions")
     chrome_options.add_argument("--disable-popup-blocking")
     chrome_options.add_argument("--disable-features=OptimizationHints")
-    chrome_options.add_argument("--disable-features=PreloadMediaEngagementData,MediaPreload,OptimizationHints")
-    # Bilder nicht laden
     prefs = {
         "profile.managed_default_content_settings.images": 2,  # Bilder blockieren
         "profile.default_content_setting_values.notifications": 2,  # Benachrichtigungen blockieren
-        "profile.default_content_setting_values.plugins": 1  # Plugins erlauben
     }
     chrome_options.add_experimental_option("prefs", prefs)
 
-    # Proxy-Einstellungen
     proxy, blocked_proxies = get_proxy()
     if proxy:
         chrome_options.add_argument(f'--proxy-server={proxy}')
-    else:
-        blocked_proxies = {}
 
     if headless:
         chrome_options.add_argument("--headless")
@@ -254,6 +263,7 @@ def setup_selenium(headless=False):
     driver = uc.Chrome(options=chrome_options)
     bypass_selenium_detection(driver)
     return driver, proxy, blocked_proxies
+
 def bypass_selenium_detection(driver):
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     driver.execute_script("window.navigator.chrome = { runtime: {} };")
@@ -271,16 +281,6 @@ def bypass_selenium_detection(driver):
       }
     });
     """)
-    driver.execute_script("""
-    Object.defineProperty(navigator, 'permissions', {
-      query: function(parameters) {
-        return parameters.name === 'notifications' ?
-          Promise.resolve({ state: 'denied' }) :
-          window.navigator.permissions.query(parameters);
-      }
-    });
-    """)
-
 
 def human_like_mouse_move(driver, element):
     actions = ActionChains(driver)
@@ -491,37 +491,26 @@ def run_steps(driver, proxy, blocked_proxies):
         screenname_skip.click()
         time.sleep(3)
 
-        print(f"Entering random username: {random_username}.")
+        # Verwende die Funktion in der Hauptlogik nach der Passworteingabe
+        print(f"Benutzername eingeben: {random_username}")
         username_input = driver.find_element(By.CSS_SELECTOR, "input#Username-text-input")
         human_like_mouse_move(driver, username_input)
         username_input.send_keys(random_username)
         time.sleep(2)
 
-        print(f"Entering password: {random_password}.")
+        print(f"Passwort eingeben: {random_password}")
         password_input = driver.find_element(By.CSS_SELECTOR, "input#password-text-input-test")
         human_like_mouse_move(driver, password_input)
         password_input.send_keys(random_password)
         time.sleep(2)
 
-        # Check if username is already taken
-        error_message = "Username is already used by someone else."
-        while True:
-            try:
-                # Check for the error message indicating the username is taken
-                error_element = driver.find_element(By.CSS_SELECTOR, "p#error-text[data-testid='Username-text-input-error']")
-                if error_message in error_element.text:
-                    print(f"Username {random_username} is taken. Generating a new one.")
-                    random_username = get_random_name()
+        # Überprüfen, ob ein Username-Fehler vorliegt, und bis zu 3 Versuche unternehmen
+        random_username = handle_username_error(driver, username_input, password_input, random_username, random_password)
 
-                    # Clear and enter new username
-                    username_input.clear()
-                    human_like_mouse_move(driver, username_input)
-                    username_input.send_keys(random_username)
-                    time.sleep(2)
-                else:
-                    break
-            except:
-                break
+        if not random_username:
+            print("Prozess wird nach mehreren fehlgeschlagenen Versuchen abgebrochen.")
+            driver.quit()
+            return
 
         print("Clicking on Create Account.")
         create_account_button = driver.find_element(By.XPATH, "//*[text()='Create Account']")
@@ -572,7 +561,6 @@ def run_steps(driver, proxy, blocked_proxies):
         human_like_mouse_move(driver, continue_button)
         time.sleep(1)
         continue_button.click()
-        
 
         print("Waiting for account activation confirmation.")
         WebDriverWait(driver, 30).until(EC.text_to_be_present_in_element((By.XPATH, "//*[text()='Thank you for activating your account!']"), "Thank you for activating your account!"))
@@ -581,7 +569,6 @@ def run_steps(driver, proxy, blocked_proxies):
 
         print("Account successfully created. Blocking the current proxy for 10 minutes and starting the process for a new account...")
 
-        # Erfolgszähler erhöhen und Proxy für 10 Minuten blockieren (Cooldown)
         block_proxy(proxy, blocked_proxies, block_duration_minutes=10, success=True)
 
         driver.quit()
