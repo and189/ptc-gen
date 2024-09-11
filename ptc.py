@@ -37,7 +37,7 @@ for package in required_packages:
 # Configuration Section
 EMAIL_CONFIG = {
     "user": "xxxx@gmail.com",
-    "password": "xxxx xxxx xxxx xxxxx",
+    "password": "xxx xxx xx xxxx",
     "imap_host": "imap.gmail.com",
     "target_sender": "no-reply@tmi.pokemon.com"
 }
@@ -188,25 +188,33 @@ def load_proxy_stats():
             reader = csv.reader(file)
             next(reader)  # Überspringe den Header
             for row in reader:
-                stats[row[0]] = {'bans': int(row[1]), 'successes': int(row[2])}
+                stats[row[0]] = {
+                    'bans': int(row[1]), 
+                    'successes': int(row[2]), 
+                    'last_used': datetime.strptime(row[3], '%Y-%m-%d %H:%M:%S') if row[3] else None
+                }
     return stats
-
+    
 def update_proxy_stats(proxy, success=False):
     stats = load_proxy_stats()
-    
+
     if proxy not in stats:
-        stats[proxy] = {'bans': 0, 'successes': 0}
-    
+        stats[proxy] = {'bans': 0, 'successes': 0, 'last_used': None}
+
     if success:
         stats[proxy]['successes'] += 1
+        stats[proxy]['last_used'] = datetime.now()
     else:
         stats[proxy]['bans'] += 1
-    
+        stats[proxy]['last_used'] = datetime.now()
+
     with open(PROXY_STATS_FILE, mode='w', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow(['Proxy', 'Bans', 'Successes'])
+        writer.writerow(['Proxy', 'Bans', 'Successes', 'Last_Used'])
         for proxy, stat in stats.items():
-            writer.writerow([proxy, stat['bans'], stat['successes']])
+            last_used_str = stat['last_used'].strftime('%Y-%m-%d %H:%M:%S') if stat['last_used'] else ''
+            writer.writerow([proxy, stat['bans'], stat['successes'], last_used_str])
+
 
 def load_blocked_proxies():
     blocked_proxies = {}
@@ -225,25 +233,38 @@ def save_blocked_proxies(blocked_proxies):
             file.write(f"{proxy},{timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n")
 
 def block_proxy(proxy, blocked_proxies, block_duration_minutes, success=False):
+    stats = load_proxy_stats()
+
+    # Initialisiere den Proxy in den Statistiken, falls er noch nicht existiert
+    if proxy not in stats:
+        stats[proxy] = {'bans': 0, 'successes': 0, 'last_used': None}
+
     if success:
         print(f"Proxy {proxy} erfolgreich. Sperren für {block_duration_minutes} Minuten.")
     else:
+        # Dynamisch steigende Sperrzeit basierend auf Fehleranzahl
+        block_duration_minutes = 15 * (stats[proxy]['bans'] + 1)  # Erste Sperre 15 Minuten, zweite 30 Minuten, usw.
         print(f"Proxy {proxy} gescheitert. Sperren für {block_duration_minutes} Minuten.")
-    
+        stats[proxy]['bans'] += 1  # Erhöhe die Anzahl der Sperren
+
+    # Setze den Proxy in den Cooldown
     blocked_proxies[proxy] = datetime.now() + timedelta(minutes=block_duration_minutes)
     save_blocked_proxies(blocked_proxies)
+    
+    # Aktualisiere die Proxy-Statistiken
     update_proxy_stats(proxy, success=success)
 
 def get_proxy():
     proxies = []
     blocked_proxies = load_blocked_proxies()
-    
+    proxy_stats = load_proxy_stats()
+
     if os.path.exists(PROXY_FILE):
         with open(PROXY_FILE, 'r') as file:
             proxies = [line.strip() for line in file.readlines()]
 
-        # Mische die Proxy-Liste nach jedem Lauf
-        random.shuffle(proxies)
+        # Sortiere Proxies nach Erfolg, bevorzugte Proxies ohne Cooldown
+        proxies.sort(key=lambda p: (-proxy_stats.get(p, {}).get('successes', 0), proxy_stats.get(p, {}).get('last_used', datetime.min)))
 
         for proxy in proxies:
             if proxy not in blocked_proxies or datetime.now() > blocked_proxies[proxy]:
@@ -254,8 +275,7 @@ def get_proxy():
 
     print("Keine verfügbaren Proxys gefunden.")
     return None, blocked_proxies
-
-def setup_selenium(headless=False):
+def setup_selenium(headless=True):
     chrome_options = uc.ChromeOptions()
 
     # Standardoptionen
@@ -397,87 +417,87 @@ def run_steps(driver, proxy, blocked_proxies):
 
         print("Navigating to https://join.pokemon.com/")
         driver.get("https://join.pokemon.com/")
-        WebDriverWait(driver, 30).until(EC.url_contains("pokemon"))
-        time.sleep(2)
 
+        # Warte darauf, dass die URL den Text "pokemon" enthält
+        WebDriverWait(driver, 30).until(EC.url_contains("pokemon"))
+        
+        # Warte darauf, dass die Seite vollständig geladen ist
+        WebDriverWait(driver, 30).until(lambda d: d.execute_script('return document.readyState') == 'complete')
+
+        # Überprüfe den Seitenquelltext auf "Access denied" oder "Error 16"
         if "Access denied" in driver.page_source or "Error 16" in driver.page_source:
             print("Website not loading. Blocking proxy for 24 hours.")
-            block_proxy(proxy, blocked_proxies, block_duration_minutes=1440)  # 24 hours
+            block_proxy(proxy, blocked_proxies, block_duration_minutes=1440)  # 24 Stunden sperren
             driver.quit()
             driver, proxy, blocked_proxies = setup_selenium()
             run_steps(driver, proxy, blocked_proxies)
             return
 
-        print("Clearing cookies.")
-        driver.delete_all_cookies()
-        time.sleep(2)
+        print("Selecting country: Germany.")
+        
+        # Warte darauf, dass das Country Select-Element sichtbar und klickbar ist
+        country_select = WebDriverWait(driver, 30).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "select#country-select"))
+        )
+        human_like_mouse_move(driver, country_select)
+        country_select.send_keys("Germany")
 
-        print("Refreshing the page.")
-        driver.refresh()
-        time.sleep(5)
 
-        print("Waiting for 5 seconds.")
-        time.sleep(5)
 
         print("Selecting country: Germany.")
         country_select = driver.find_element(By.CSS_SELECTOR, "select#country-select")
         human_like_mouse_move(driver, country_select)
         country_select.send_keys("Germany")
-        time.sleep(1)
 
         print(f"Selecting birth year: {year}.")
         year_select = driver.find_element(By.CSS_SELECTOR, "select#year-select")
         human_like_mouse_move(driver, year_select)
         year_select.send_keys(str(year))
-        time.sleep(1)
 
         print(f"Selecting birth month: {month}.")
         month_select = driver.find_element(By.CSS_SELECTOR, "select#month-select")
         human_like_mouse_move(driver, month_select)
         month_select.send_keys(month)
-        time.sleep(1)
 
         print(f"Selecting birth day: {day}.")
         day_select = driver.find_element(By.CSS_SELECTOR, "select#day-select")
         human_like_mouse_move(driver, day_select)
         day_select.send_keys(str(day))
-        time.sleep(1)
 
         print("Clicking continue button.")
         submit_button = WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button#ageGateSubmit")))
         human_like_mouse_move(driver, submit_button)
         submit_button.click()
-        time.sleep(2)
 
         print("Clicking the I AM Sure button.")
         button_6 = WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.basic-button:nth-child(6)")))
         human_like_mouse_move(driver, button_6)
         button_6.click()
-        time.sleep(3)
+        time.sleep(1)
 
         print(f"Entering email: {random_email}")
         email_input = driver.find_element(By.CSS_SELECTOR, "input#email-text-input")
         human_like_mouse_move(driver, email_input)
         email_input.send_keys(random_email)
-        time.sleep(2)
+        time.sleep(1)
 
         print(f"Confirming email: {random_email}")
         confirm_input = driver.find_element(By.CSS_SELECTOR, "input#confirm-text-input")
         human_like_mouse_move(driver, confirm_input)
         confirm_input.send_keys(random_email)
-        time.sleep(2)
+        time.sleep(1)
 
         print("Clicking marketing checkbox.")
         marketing_checkbox = driver.find_element(By.CSS_SELECTOR, "input#marketing")
         human_like_mouse_move(driver, marketing_checkbox)
         marketing_checkbox.click()
-        time.sleep(2)
+        time.sleep(1)
 
         print("Clicking basic button to continue.")
         basic_button = driver.find_element(By.CSS_SELECTOR, "button.basic-button")
         human_like_mouse_move(driver, basic_button)
         basic_button.click()
-        time.sleep(15)
+        time.sleep(5)
 
         if "Oops! There Was an Error" in driver.page_source:
             print("Bot detection encountered. Blocking proxy for 12 hours.")
@@ -491,9 +511,9 @@ def run_steps(driver, proxy, blocked_proxies):
         mui_button = WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.MuiButton-contained")))
         human_like_mouse_move(driver, mui_button)
         mui_button.click()
-        time.sleep(3)
+        time.sleep(1)
         mui_button.click()
-        time.sleep(10)
+        time.sleep(1)
         
         if "Oops! There Was an Error" in driver.page_source:
             print("Bot detection encountered. Blocking proxy for 12 hours.")
@@ -507,7 +527,7 @@ def run_steps(driver, proxy, blocked_proxies):
         screenname_skip = driver.find_element(By.CSS_SELECTOR, "button#screennameSkip")
         human_like_mouse_move(driver, screenname_skip)
         screenname_skip.click()
-        time.sleep(3)
+        time.sleep(1)
 
         # Verwende die Funktion in der Hauptlogik nach der Passworteingabe
         print(f"Benutzername eingeben: {random_username}")
@@ -560,6 +580,8 @@ def run_steps(driver, proxy, blocked_proxies):
             run_steps(driver, proxy, blocked_proxies)
             return
 
+        time.sleep(10)
+
         print("Getting confirmation email.")
         pin = get_confirmation_email(generated_email=random_email, retry_attempts=3, retry_delay=30)
         if pin:
@@ -572,7 +594,7 @@ def run_steps(driver, proxy, blocked_proxies):
             driver.quit()
             return
 
-        time.sleep(20)
+        time.sleep(5)
         
         print("Clicking on Continue.")
         continue_button = driver.find_element(By.XPATH, "//*[text()='Continue']")
@@ -585,9 +607,9 @@ def run_steps(driver, proxy, blocked_proxies):
 
         save_account_to_csv(random_email, random_username, random_password, pin)
 
-        print("Account successfully created. Blocking the current proxy for 10 minutes and starting the process for a new account...")
+        print("Account successfully created. Blocking the current proxy for 31 minutes and starting the process for a new account...")
 
-        block_proxy(proxy, blocked_proxies, block_duration_minutes=10, success=True)
+        block_proxy(proxy, blocked_proxies, block_duration_minutes=31, success=True)
 
         driver.quit()
         driver, proxy, blocked_proxies = setup_selenium()
@@ -604,7 +626,7 @@ def run_steps(driver, proxy, blocked_proxies):
 if __name__ == "__main__":
     while True:  # To automatically restart the process on crash
         try:
-            headless = False
+            headless = True
             driver, proxy, blocked_proxies = setup_selenium(headless=headless)
             run_steps(driver, proxy, blocked_proxies)
             driver.quit()
