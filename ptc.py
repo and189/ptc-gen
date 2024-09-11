@@ -83,27 +83,46 @@ def generate_random_birthdate():
 def get_random_name():
     first_names = [
         "Max", "Lukas", "Felix", "Jonas", "Leon", "Emma", "Anna", "Sophia", "Mia", "Noah", "Paul", "Elias", 
-        "Lena", "Marie", "Clara", "Finn", "Ben", "Tom", "Julia", "Lea", "Erik", "Hanna", "Tim", "Laura", "Lara"
+        "Lena", "Marie", "Clara", "Finn", "Ben", "Tom", "Julia", "Lea", "Erik", "Hanna", "Tim", "Laura", "Lara",
+        "Nina", "Sara", "Pia", "Ole", "Marlon", "Simon", "Philipp", "Alexander", "Tobias", "Kevin", "David", "Florian",
+        "Nico", "Robin", "Samuel", "Valentin", "Dominik", "Jannik", "Maya", "Ella", "Jule", "Greta", "Carla", "Sophie",
+        "Fabian", "Hannes", "Mats", "Lia", "Amelie", "Lilly", "Mila", "Isabel", "Olivia", "Leonard", "Matthias", 
+        "Sebastian", "Jan", "Jakob", "Julius", "Christian", "Patrick", "Daniel", "Oliver", "Dennis", "Stefan", "Nils", 
+        "Lars", "Mike", "Nick", "Viktor", "Alina", "Caroline", "Charlotte", "Johanna", "Tina", "Elena", "Selina", 
+        "Vanessa", "Lisa", "Monika", "Heidi", "Petra", "Melanie", "Sonja", "Lena", "Franziska", "Anja", "Katja", "Eva"
     ]
     
     last_names = [
         "Schmidt", "Mueller", "Weber", "Fischer", "Schneider", "Lehmann", "Koch", "Bauer", "Wagner", "Becker",
-        "Hoffmann", "Schulz", "Krause", "Richter", "Wolf", "Neumann", "Zimmermann", "Hartmann", "Klein", "Schwarz"
+        "Hoffmann", "Schulz", "Krause", "Richter", "Wolf", "Neumann", "Zimmermann", "Hartmann", "Klein", "Schwarz",
+        "Kruger", "Peters", "Lang", "Dietrich", "Huber", "Schroeder", "Engel", "Bergmann", "Otto", "Lorenz", 
+        "Schmitt", "Bock", "Stein", "Albrecht", "Jung", "Schuster", "Vogel", "Friedrich", "Kuhn", "Weiss", "Brandt", 
+        "Haas", "Schlegel", "Busch", "Mayer", "Seidel", "Lindner", "Kraus", "Kirchner", "Behrens", "Metzger", "Mohr", 
+        "Seifert", "Reich", "Braun", "Eckert", "Wendt", "Wirth", "Fink", "Bauer", "Horn", "Hermann", "Thiele", 
+        "Ernst", "Franke", "Linke", "Voigt", "Mayer", "Hahn", "Fischer", "Barth", "Roth", "Hein", "Kolb", "Schuster", 
+        "Frank", "Weber", "Pohl", "Schilling", "Arnold", "Scherer", "Ulrich", "Schwab", "Winkler", "Haase", "Sauer", 
+        "Keller", "Konig", "Schubert", "Winter", "Graf", "Ritter", "Schumann", "Lorenz", "Wolff", "Seifert", "Berger", 
+        "Paul", "Kuhn", "Kraus", "Ziegler"
     ]
     
     # Kombiniere Vor- und Nachnamen
     name = random.choice(first_names).lower() + random.choice(last_names).lower()
     
     # Füge Zahlen hinzu
-    number = ''.join(random.choices('0123456789', k=random.randint(2, 4)))
+    number = ''.join(random.choices(string.digits, k=random.randint(2, 4)))
     
     # Füge zufällig einige zusätzliche Buchstaben am Ende hinzu
-    extra_letters = ''.join(random.choices('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ', k=random.randint(2, 4)))
+    extra_letters = ''.join(random.choices(string.ascii_letters, k=random.randint(2, 4)))
     
     # Mische Groß- und Kleinbuchstaben in Name, Zahl und Zusatzbuchstaben
     username = ''.join(random.choice([char.upper(), char.lower()]) for char in name + number + extra_letters)
     
+    # Stelle sicher, dass die Länge zwischen 12 und 16 Zeichen liegt
     return username[:random.randint(12, 16)]
+
+# Beispielnutzung
+for _ in range(10):
+    print(get_random_name())
 
 def generate_random_email():
     local_part = get_random_name()
