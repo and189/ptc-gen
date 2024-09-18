@@ -23,6 +23,10 @@ import queue
 from concurrent.futures import ThreadPoolExecutor
 import queue
 from datetime import datetime, timedelta
+import os
+import signal
+import psutil
+
 
 # List of required packages
 required_packages = [
@@ -46,13 +50,13 @@ for package in required_packages:
 # Configuration Section
 EMAIL_CONFIG = {
     "user": "xxxx@gmail.com",
-    "password": "xxx xxxx xxx xxxx",
+    "password": "xxxx xx yruk xx",
     "imap_host": "imap.gmail.com",
     "target_sender": "no-reply@tmi.pokemon.com"
 }
 
 DOMAIN_CONFIG = {
-    "domains": ["xxxx.eu", "xxx.de", "xxxx.de", "xxxx.de", "xxxx.de", "xxx.de", "xxxx.de"]
+    "domains": ["kwstaylor.eu", "lalalilumail.de", "lalalimail.de", "lalilumail.de", "lolofugemaier.de", "mailuuutex.de", "petersmaillll.de"]
 }
 
 PROXY_STATS_FILE = 'proxy_stats.csv'
@@ -121,7 +125,6 @@ def return_proxy_to_queue(proxy, thread_id, success=False):
     else:
         proxy_queue_2.put((priority, proxy))
         
-
 def save_account_to_csv(email, username, password, pin):
     now = datetime.now()
     date_time = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -130,8 +133,10 @@ def save_account_to_csv(email, username, password, pin):
     with open(csv_file, mode='a', newline='') as file:
         writer = csv.writer(file)
         if file.tell() == 0:
-            writer.writerow(['Email', 'Username', 'Password', 'PIN', 'Proxy', 'Date', 'Time'])
-        writer.writerow([email, username, password, pin, proxy, date_time])
+            # Schreibe die Kopfzeile nur, wenn die Datei leer ist
+            writer.writerow(['Email', 'Username', 'Password', 'PIN', 'Date', 'Time'])
+        # Schreibe die Daten ohne Proxy in die CSV
+        writer.writerow([email, username, password, pin, date_time.split()[0], date_time.split()[1]])
     
     print(f"Account saved to {csv_file}: {email}, {username}, {password}, {pin}, {date_time}")
 
@@ -251,14 +256,21 @@ def load_proxy_stats():
     if os.path.exists(PROXY_STATS_FILE):
         with open(PROXY_STATS_FILE, mode='r') as file:
             reader = csv.reader(file)
-            next(reader)
+            next(reader)  # Skip header
             for row in reader:
-                stats[row[0]] = {
-                    'bans': int(row[1]), 
-                    'successes': int(row[2]), 
-                    'last_used': datetime.strptime(row[3], '%Y-%m-%d %H:%M:%S') if row[3] else None
-                }
+                if len(row) < 4:
+                    print(f"Skipping invalid row in proxy stats: {row}")
+                    continue
+                try:
+                    stats[row[0]] = {
+                        'bans': int(row[1]),
+                        'successes': int(row[2]),
+                        'last_used': datetime.strptime(row[3], '%Y-%m-%d %H:%M:%S') if row[3] else None
+                    }
+                except Exception as e:
+                    print(f"Error processing row {row}: {e}")
     return stats
+
     
 def update_proxy_stats(proxy, success=False):
     stats = load_proxy_stats()
@@ -296,17 +308,19 @@ def save_blocked_proxies(blocked_proxies):
         for proxy, timestamp in blocked_proxies.items():
             file.write(f"{proxy},{timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n")
 
+
 def setup_selenium_for_thread(thread_id, headless=False):
     chrome_options = uc.ChromeOptions()
 
-    # Standard options
+    # Standard-Optionen setzen
     chrome_options.add_argument("--lang=en-US")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_argument("--disable-webrtc")
     chrome_options.add_argument("--disable-extensions")
     chrome_options.add_argument("--disable-popup-blocking")
     chrome_options.add_argument("--disable-features=OptimizationHints")
-    chrome_options.add_argument("--window-size=850,412")
+    chrome_options.add_argument("--window-size=412,850")
+    chrome_options.add_argument("--disable-search-engine-choice-screen")
 
     prefs = {
         "profile.managed_default_content_settings.images": 2,
@@ -314,6 +328,7 @@ def setup_selenium_for_thread(thread_id, headless=False):
     }
     chrome_options.add_experimental_option("prefs", prefs)
 
+    # Hole den Proxy für den jeweiligen Thread
     proxy = get_proxy_for_thread(thread_id)
     if proxy:
         chrome_options.add_argument(f'--proxy-server={proxy}')
@@ -321,14 +336,37 @@ def setup_selenium_for_thread(thread_id, headless=False):
     if headless:
         chrome_options.add_argument("--headless")
 
+
     driver = uc.Chrome(driver_executable_path=ChromeDriverManager().install(), options=chrome_options)
     driver.set_window_position(0, 0)
-    driver.set_window_size(850, 412)
+    driver.set_window_size(412, 850)
 
     bypass_selenium_detection(driver)
-    return driver, proxy
+    
+    # Store both the driver and the PID
+    browser_pid = driver.service.process.pid
+    print(f"Thread {thread_id}: Browser started with PID {browser_pid}")
 
-def block_proxy(proxy, thread_id, block_duration_minutes, success=False):
+    return driver, proxy, browser_pid
+
+def kill_browser_process(pid):
+    try:
+        parent = psutil.Process(pid)
+        children = parent.children(recursive=True)
+        for child in children:
+            child.terminate()
+        parent.terminate()
+        gone, alive = psutil.wait_procs([parent] + children, timeout=3)
+        for p in alive:
+            p.kill()
+        print(f"Browser process with PID {pid} and its children have been terminated.")
+    except psutil.NoSuchProcess:
+        print(f"Process with PID {pid} not found.")
+    except Exception as e:
+        print(f"Error killing process {pid}: {e}")
+
+
+def block_proxy(proxy, thread_id, block_duration_minutes, success=False, driver=None):
     stats = load_proxy_stats()
 
     if proxy not in stats:
@@ -347,13 +385,27 @@ def block_proxy(proxy, thread_id, block_duration_minutes, success=False):
 
     stats[proxy]['last_used'] = blocked_until
     update_proxy_stats(proxy, success=success)
-    
-    # Simuliere die Sperrzeit durch Verzögerung
-    time.sleep(block_duration_minutes * 60)
-    
-    # Gib den Proxy zurück in die Queue
+
+    # Close the current browser, if a driver exists
+    if driver:
+        try:
+            driver.quit()
+            print(f"Thread {thread_id}: Browser für Proxy {proxy} geschlossen.")
+        except Exception as e:
+            print(f"Thread {thread_id}: Fehler beim Schließen des Browsers: {e}")
+
+    # Return the proxy to the queue
     return_proxy_to_queue(proxy, thread_id, success)
+
+    # Get the next proxy and start a new browser
+    print(f"Thread {thread_id}: Wähle den nächsten Proxy und starte einen neuen Browser...")
     
+    # Unpack all three values from setup_selenium_for_thread
+    new_driver, new_proxy, browser_pid = setup_selenium_for_thread(thread_id)
+    
+    # Start the process again with the new proxy and driver
+    run_steps(new_driver, new_proxy, thread_id, browser_pid)
+   
 def bypass_selenium_detection(driver):
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     driver.execute_script("window.navigator.chrome = { runtime: {} };")
@@ -497,7 +549,7 @@ def fill_form_via_javascript(driver, year, month, day):
         traceback.print_exc()
 
 def send_data_to_api(username, password):
-    url = "http://IPPPP.de:5006/webhook"
+    url = "http://XXXXX:5006/webhook"
     data = {
         "username": username,
         "password": password
@@ -511,7 +563,7 @@ def send_data_to_api(username, password):
     except Exception as e:
         print(f"Error sending data to API: {e}")
 
-def run_steps(driver, proxy, thread_id):
+def run_steps(driver, proxy, thread_id, browser_pid):
     try:
         year, month, day = generate_random_birthdate()
         random_email = generate_random_email()
@@ -543,8 +595,7 @@ def run_steps(driver, proxy, thread_id):
         if error_element or blocked_message:
             print(f"Thread {thread_id}: Error 16 or security block detected. Blocking proxy for 12 hours.")
             block_proxy(proxy, thread_id, block_duration_minutes=720)
-            driver.quit()
-            return
+            return  # Frühzeitiger Abbruch ohne weiteren Prozess
 
         fill_form_via_javascript(driver, year, month, day)
 
@@ -553,6 +604,12 @@ def run_steps(driver, proxy, thread_id):
         human_like_mouse_move(driver, button_6)
         button_6.click()
         time.sleep(1)
+
+        # **NEU: Überprüfen auf die Meldung "Oops! There Was an Error"**
+        if "Oops! There Was an Error" in driver.page_source:
+            print(f"Thread {thread_id}: 'Oops! There Was an Error' detected. Blocking proxy for 12 hours.")
+            block_proxy(proxy, thread_id, block_duration_minutes=720)
+            return  # Frühzeitiger Abbruch
 
         print(f"Thread {thread_id}: Entering email: {random_email}")
         email_input = driver.find_element(By.CSS_SELECTOR, "input#email-text-input")
@@ -575,10 +632,10 @@ def run_steps(driver, proxy, thread_id):
         basic_button.click()
         time.sleep(3)
 
+        # **NEU: Überprüfen auf Bot-Erkennungsmeldungen**
         if "Oops! There Was an Error" in driver.page_source:
             print(f"Thread {thread_id}: Bot detection encountered. Blocking proxy for 12 hours.")
             block_proxy(proxy, thread_id, block_duration_minutes=720)
-            driver.quit()
             return
 
         print(f"Thread {thread_id}: Clicking MuiButton-contained button.")
@@ -592,7 +649,6 @@ def run_steps(driver, proxy, thread_id):
         if "Oops! There Was an Error" in driver.page_source:
             print(f"Thread {thread_id}: Bot detection encountered. Blocking proxy for 12 hours.")
             block_proxy(proxy, thread_id, block_duration_minutes=720)
-            driver.quit()
             return
 
         print(f"Thread {thread_id}: Clicking to skip screenname setup with username: {random_username}.")
@@ -610,12 +666,6 @@ def run_steps(driver, proxy, thread_id):
         human_like_mouse_move(driver, password_input)
         password_input.send_keys(random_password)
 
-        random_username = handle_username_error(driver, username_input, password_input, random_username, random_password)
-
-        if not random_username:
-            print(f"Thread {thread_id}: Process aborted after multiple failed attempts.")
-            driver.quit()
-            return
 
         print(f"Thread {thread_id}: Clicking on Create Account.")
         create_account_button = driver.find_element(By.XPATH, "//*[text()='Create Account']")
@@ -630,35 +680,20 @@ def run_steps(driver, proxy, thread_id):
         time.sleep(1)
         i_am_sure_button.click()
         time.sleep(5)
+        
+        # **NEU: Überprüfen auf "Username is already in use"**
+        random_username = handle_username_error(driver, username_input, password_input, random_username, random_password)
 
+        if not random_username:
+            print(f"Thread {thread_id}: Process aborted after multiple failed attempts.")
+            return
+
+        # **NEU: Letzte Überprüfung auf Bot-Erkennung**
         if "Oops! It looks like something went wrong." in driver.page_source:
             print(f"Thread {thread_id}: Bot detection encountered. Blocking proxy for 12 hours.")
             block_proxy(proxy, thread_id, block_duration_minutes=720)
-            driver.quit()
             return
 
-        try:
-            error_element = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, "//h1[text()='Oops! There Was an Error']"))
-            )
-            print(f"Thread {thread_id}: Error message detected: 'Oops! There Was an Error'")
-        except:
-            error_element = None
-
-        try:
-            contact_button = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "#root > div > div.App > div > div > span:nth-child(2) > a.basic-button.link-button.primary"))
-            )
-            print(f"Thread {thread_id}: Contact Customer Support button detected.")
-        except:
-            contact_button = None
-
-        if error_element or contact_button:
-            print(f"Thread {thread_id}: Error or support button encountered. Blocking proxy for 12 hours.")
-            block_proxy(proxy, thread_id, block_duration_minutes=720)
-            driver.quit()
-            return
-   
         time.sleep(15)
 
         print(f"Thread {thread_id}: Getting confirmation email.")
@@ -670,7 +705,6 @@ def run_steps(driver, proxy, thread_id):
             pin_input.send_keys(pin)
         else:
             print(f"Thread {thread_id}: PIN not found. Exiting.")
-            driver.quit()
             return
 
         time.sleep(1)
@@ -680,40 +714,63 @@ def run_steps(driver, proxy, thread_id):
         human_like_mouse_move(driver, continue_button)
         time.sleep(1)
         continue_button.click()
-
+  
+  # **NEU: Letzte Überprüfung auf Bot-Erkennung**
+        if "Oops! It looks like something went wrong." in driver.page_source:
+            print(f"Thread {thread_id}: Bot detection encountered. Blocking proxy for 12 hours.")
+            block_proxy(proxy, thread_id, block_duration_minutes=720)
+            return
+            
         print(f"Thread {thread_id}: Waiting for account activation confirmation.")
         WebDriverWait(driver, 30).until(
             EC.text_to_be_present_in_element((By.XPATH, "//*[text()='Thank you for activating your account!']"), 
                                              "Thank you for activating your account!")
         )
 
-        # Save account details to CSV and send them to the API
+          # Erfolgreicher Durchlauf, Konto erstellt
         save_account_to_csv(random_email, random_username, random_password, pin)
-        # send_data_to_api(random_username, random_password)
+        send_data_to_api(random_username, random_password)
 
         print_success_message(f"Thread {thread_id}: Account successfully created. Blocking the current proxy for 31 minutes and starting the process for a new account...")
-
-        # Block the proxy for 31 minutes after successful account creation
+        
+        # **Browser hier schließen, bevor Proxy blockiert wird**
+        driver.quit()  # Sicherstellen, dass der Browser geschlossen wird
+        
+        # Blockiere Proxy und starte neuen Prozess
         block_proxy(proxy, thread_id, block_duration_minutes=31, success=True)
-
-        driver.quit()
-
+        
     except Exception as e:
         print(f"Thread {thread_id} encountered an error: {e}")
         traceback.print_exc()
-        block_proxy(proxy, thread_id, block_duration_minutes=720)  # 12 hours block in case of an error
-        driver.quit()
+    finally:
+        try:
+            driver.quit()
+            print(f"Thread {thread_id}: Browser closed via driver.quit().")
+        except Exception as e:
+            print(f"Thread {thread_id}: Error closing browser via driver.quit(): {e}")
+        finally:
+            kill_browser_process(browser_pid)
+            time.sleep(2)
 
 def run_steps_for_thread(thread_id):
     while True:
+        driver = None
+        browser_pid = None
         try:
-            driver, proxy = setup_selenium_for_thread(thread_id)
-            run_steps(driver, proxy, thread_id)
-            driver.quit()
+            driver, proxy, browser_pid = setup_selenium_for_thread(thread_id)
+            run_steps(driver, proxy, thread_id, browser_pid)
         except Exception as e:
             print(f"Thread {thread_id} encountered an error: {e}")
             traceback.print_exc()
-            time.sleep(30)
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+            if browser_pid:
+                kill_browser_process(browser_pid)
+            time.sleep(3)  # Wait before starting the next iteration
 
 if __name__ == "__main__":
     initialize_proxy_queues()
@@ -721,4 +778,3 @@ if __name__ == "__main__":
     with ThreadPoolExecutor(max_workers=2) as executor:
         executor.submit(run_steps_for_thread, 1)
         executor.submit(run_steps_for_thread, 2)
-        
