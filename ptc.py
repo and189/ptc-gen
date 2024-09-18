@@ -50,13 +50,13 @@ for package in required_packages:
 # Configuration Section
 EMAIL_CONFIG = {
     "user": "xxxx@gmail.com",
-    "password": "xxxx xx yruk xx",
+    "password": "xxx xxx xx xx",
     "imap_host": "imap.gmail.com",
     "target_sender": "no-reply@tmi.pokemon.com"
 }
 
 DOMAIN_CONFIG = {
-    "domains": ["kwstaylor.eu", "lalalilumail.de", "lalalimail.de", "lalilumail.de", "lolofugemaier.de", "mailuuutex.de", "petersmaillll.de"]
+    "domains": ["xxx.eu", "xx.de", "xx.de", "xx.de", "xx.de", "xxx.de", "xx.de"]
 }
 
 PROXY_STATS_FILE = 'proxy_stats.csv'
@@ -549,7 +549,7 @@ def fill_form_via_javascript(driver, year, month, day):
         traceback.print_exc()
 
 def send_data_to_api(username, password):
-    url = "http://XXXXX:5006/webhook"
+    url = "http://ccc.cc.cc.cc:5006/webhook"
     data = {
         "username": username,
         "password": password
@@ -562,6 +562,55 @@ def send_data_to_api(username, password):
             print(f"Failed to send data. Status code: {response.status_code}")
     except Exception as e:
         print(f"Error sending data to API: {e}")
+def check_for_errors_and_restart(driver, proxy, thread_id):
+    """
+    Diese Funktion überprüft, ob Fehler wie 'Oops! There Was an Error' oder der 'Contact Customer Support'-Button
+    angezeigt werden. Falls ja, wird der Proxy für 12 Stunden blockiert, der Browser geschlossen und ein neuer
+    Browser gestartet.
+    """
+    try:
+        # Warte, bis das <h1> Element mit dem Text 'Oops! There Was an Error' erscheint (bis zu 10 Sekunden)
+        try:
+            error_element = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, "//h1[text()='Oops! There Was an Error']"))
+            )
+            print("Error message detected: 'Oops! There Was an Error'")
+        except:
+            error_element = None
+
+        # Warte, bis der 'Contact Customer Support' Button verfügbar ist
+        try:
+            contact_button = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "#root > div > div.App > div > div > span:nth-child(2) > a.basic-button.link-button.primary"))
+            )
+            print("Contact Customer Support button detected.")
+        except:
+            contact_button = None
+
+        # Wenn eines der Elemente gefunden wurde
+        if error_element or contact_button:
+            print("Error or support button encountered. Blocking proxy for 12 hours.")
+            
+            # Proxy für 12 Stunden blockieren
+            block_proxy(proxy, thread_id, block_duration_minutes=720)  # 12 Stunden
+            
+            # Browser ordnungsgemäß schließen
+            driver.quit()
+
+            # Starte einen neuen Browser mit neuem Proxy
+            driver, new_proxy, browser_pid = setup_selenium_for_thread(thread_id)
+            run_steps(driver, new_proxy, thread_id, browser_pid)
+
+            return True  # Signalisiert, dass ein Fehler gefunden wurde und der Prozess neu gestartet wurde
+
+        # Falls kein Fehler gefunden wurde, warte kurz (optional)
+        time.sleep(15)
+        return False  # Kein Fehler gefunden, weiter im Prozess
+
+    except Exception as e:
+        print(f"An error occurred in check_for_errors_and_restart: {e}")
+        traceback.print_exc()
+        return False  # Im Fehlerfall auch kein Neustart, weiter im Prozess
 
 def run_steps(driver, proxy, thread_id, browser_pid):
     try:
@@ -605,11 +654,8 @@ def run_steps(driver, proxy, thread_id, browser_pid):
         button_6.click()
         time.sleep(1)
 
-        # **NEU: Überprüfen auf die Meldung "Oops! There Was an Error"**
-        if "Oops! There Was an Error" in driver.page_source:
-            print(f"Thread {thread_id}: 'Oops! There Was an Error' detected. Blocking proxy for 12 hours.")
-            block_proxy(proxy, thread_id, block_duration_minutes=720)
-            return  # Frühzeitiger Abbruch
+        if check_for_errors_and_restart(driver, proxy, thread_id):
+            return  # Frühzeitiger Abbruch, da der Browser neu gestartet wurde
 
         print(f"Thread {thread_id}: Entering email: {random_email}")
         email_input = driver.find_element(By.CSS_SELECTOR, "input#email-text-input")
@@ -632,11 +678,9 @@ def run_steps(driver, proxy, thread_id, browser_pid):
         basic_button.click()
         time.sleep(3)
 
-        # **NEU: Überprüfen auf Bot-Erkennungsmeldungen**
-        if "Oops! There Was an Error" in driver.page_source:
-            print(f"Thread {thread_id}: Bot detection encountered. Blocking proxy for 12 hours.")
-            block_proxy(proxy, thread_id, block_duration_minutes=720)
-            return
+        if check_for_errors_and_restart(driver, proxy, thread_id):
+            return  # Frühzeitiger Abbruch, da der Browser neu gestartet wurde
+
 
         print(f"Thread {thread_id}: Clicking MuiButton-contained button.")
         mui_button = WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.MuiButton-contained")))
@@ -646,10 +690,9 @@ def run_steps(driver, proxy, thread_id, browser_pid):
         mui_button.click()
         time.sleep(1)
         
-        if "Oops! There Was an Error" in driver.page_source:
-            print(f"Thread {thread_id}: Bot detection encountered. Blocking proxy for 12 hours.")
-            block_proxy(proxy, thread_id, block_duration_minutes=720)
-            return
+        if check_for_errors_and_restart(driver, proxy, thread_id):
+            return  # Frühzeitiger Abbruch, da der Browser neu gestartet wurde
+
 
         print(f"Thread {thread_id}: Clicking to skip screenname setup with username: {random_username}.")
         screenname_skip = driver.find_element(By.CSS_SELECTOR, "button#screennameSkip")
@@ -688,13 +731,14 @@ def run_steps(driver, proxy, thread_id, browser_pid):
             print(f"Thread {thread_id}: Process aborted after multiple failed attempts.")
             return
 
-        # **NEU: Letzte Überprüfung auf Bot-Erkennung**
-        if "Oops! It looks like something went wrong." in driver.page_source:
-            print(f"Thread {thread_id}: Bot detection encountered. Blocking proxy for 12 hours.")
-            block_proxy(proxy, thread_id, block_duration_minutes=720)
-            return
+        if check_for_errors_and_restart(driver, proxy, thread_id):
+            return  # Frühzeitiger Abbruch, da der Browser neu gestartet wurde
+
 
         time.sleep(15)
+        
+        if check_for_errors_and_restart(driver, proxy, thread_id):
+            return  # Frühzeitiger Abbruch, da der Browser neu gestartet wurde
 
         print(f"Thread {thread_id}: Getting confirmation email.")
         pin = get_confirmation_email(generated_email=random_email, retry_attempts=3, retry_delay=30)
@@ -714,13 +758,9 @@ def run_steps(driver, proxy, thread_id, browser_pid):
         human_like_mouse_move(driver, continue_button)
         time.sleep(1)
         continue_button.click()
-  
-  # **NEU: Letzte Überprüfung auf Bot-Erkennung**
-        if "Oops! It looks like something went wrong." in driver.page_source:
-            print(f"Thread {thread_id}: Bot detection encountered. Blocking proxy for 12 hours.")
-            block_proxy(proxy, thread_id, block_duration_minutes=720)
-            return
-            
+        if check_for_errors_and_restart(driver, proxy, thread_id):
+            return  # Frühzeitiger Abbruch, da der Browser neu gestartet wurde
+
         print(f"Thread {thread_id}: Waiting for account activation confirmation.")
         WebDriverWait(driver, 30).until(
             EC.text_to_be_present_in_element((By.XPATH, "//*[text()='Thank you for activating your account!']"), 
